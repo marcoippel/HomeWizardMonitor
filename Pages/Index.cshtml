@@ -1,0 +1,125 @@
+﻿@page
+@model IndexModel
+@{
+    ViewData["Title"] = "Home";
+}
+
+<h1>HomeWizard P1 Energiemonitor</h1>
+
+<div id="latestData">
+    <h2>Laatste meting</h2>
+    <p>Laden...</p>
+</div>
+
+<div id="chart"></div>
+
+<div id="selfConsumedSolarChart"></div>
+
+@section Scripts {
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        let powerChart;
+        let solarChart;
+
+        function updateLatestData() {
+            fetch('/api/energydata/latest')
+                .then(response => response.json())
+                .then(data => {
+                    const latestDataDiv = document.getElementById('latestData');
+                    latestDataDiv.innerHTML = `
+                                <h2>Laatste meting</h2>
+                                <p>Tijdstip: ${new Date(data.timestamp).toLocaleString()}</p>
+                                <p>Huidig verbruik: ${data.activePowerW.toFixed(2)} W</p>
+                                <p>Totaal geïmporteerd: ${data.totalPowerImportKwh.toFixed(2)} kWh</p>
+                                <p>Totaal geëxporteerd: ${data.totalPowerExportKwh.toFixed(2)} kWh</p>
+                                <p>Zelf verbruikte zonne-energie: ${data.selfConsumedSolarKwh.toFixed(2)} kWh</p>
+                            `;
+                })
+                .catch(error => console.error('Error fetching latest data:', error));
+        }
+
+        function updateCharts() {
+            fetch('/api/energydata/lasthour')
+                .then(response => response.json())
+                .then(data => {
+                    const labels = data.map(d => new Date(d.timestamp).toLocaleTimeString());
+                    const powerValues = data.map(d => d.activePowerW);
+                    const solarValues = data.map(d => d.selfConsumedSolarKwh);
+
+                    updatePowerChart(labels, powerValues);
+                    updateSolarChart(labels, solarValues);
+                })
+                .catch(error => console.error('Error fetching chart data:', error));
+        }
+
+        function updatePowerChart(labels, values) {
+            if (powerChart) {
+                powerChart.data.labels = labels;
+                powerChart.data.datasets[0].data = values;
+                powerChart.update();
+            } else {
+                const ctx = document.getElementById('chart').getContext('2d');
+                powerChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Stroomverbruik (W)',
+                            data: values,
+                            borderColor: 'rgb(75, 192, 192)',
+                            tension: 0.1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+            }
+        }
+
+        function updateSolarChart(labels, values) {
+            if (solarChart) {
+                solarChart.data.labels = labels;
+                solarChart.data.datasets[0].data = values;
+                solarChart.update();
+            } else {
+                const ctx = document.getElementById('selfConsumedSolarChart').getContext('2d');
+                solarChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Zelf verbruikte zonne-energie (kWh)',
+                            data: values,
+                            borderColor: 'rgb(255, 159, 64)',
+                            tension: 0.1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+            }
+        }
+
+        // Update data every 10 seconds
+        setInterval(() => {
+            updateLatestData();
+            updateCharts();
+        }, 10000);
+
+        // Initial update
+        updateLatestData();
+        updateCharts();
+    </script>
+}
