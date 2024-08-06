@@ -51,36 +51,54 @@ public class HomeWizardDataCollectorService : BackgroundService
             return;
         }
 
-        double totalImport = response.total_power_import_t1_kwh + response.total_power_import_t2_kwh;
-        double totalExport = response.total_power_export_t1_kwh + response.total_power_export_t2_kwh;
+        var previousReading = await GetPreviousReadingAsync();
+        double cumulativeSelfConsumedSolar = previousReading?.SelfConsumedSolarKwh ?? 0;
 
-        // Bereken zelf verbruikte zonne-energie
-        double selfConsumedSolar = 0;
+        double incrementalSelfConsumedSolar = 0;
         if (response.active_power_w < 0)
         {
             // Als we exporteren, is al het verbruik van zonne-energie
-            selfConsumedSolar = Math.Abs(response.active_power_w) / 1000; // Converteer W naar kWh
+            incrementalSelfConsumedSolar = Math.Abs(response.active_power_w) / 1000 / 3600; // Converteer W naar kWh per seconde
         }
         else
         {
             // Als we importeren, is het verschil tussen productie en export het zelf verbruik
-            double currentProduction = Math.Max(0, totalExport - (await GetPreviousTotalExportAsync()));
-            selfConsumedSolar = Math.Max(0, currentProduction - (Math.Abs(response.active_power_w) / 1000));
+            if (previousReading != null)
+            {
+                double currentProduction = Math.Max(0, response.total_power_export_t1_kwh + response.total_power_export_t2_kwh -
+                                                    (previousReading.TotalPowerExportKwh));
+                incrementalSelfConsumedSolar = Math.Max(0, currentProduction - (Math.Abs(response.active_power_w) / 1000 / 3600));
+            }
         }
+
+        cumulativeSelfConsumedSolar += incrementalSelfConsumedSolar;
 
         var energyData = new EnergyData
         {
             Timestamp = DateTime.UtcNow,
             ActivePowerW = response.active_power_w,
-            TotalPowerImportKwh = totalImport,
-            TotalPowerExportKwh = totalExport,
-            SelfConsumedSolarKwh = selfConsumedSolar
+            TotalPowerImportKwh = response.total_power_import_t1_kwh + response.total_power_import_t2_kwh,
+            TotalPowerExportKwh = response.total_power_export_t1_kwh + response.total_power_export_t2_kwh,
+            SelfConsumedSolarKwh = cumulativeSelfConsumedSolar
         };
+
+        _logger.LogInformation($"Collected data: Active Power: {energyData.ActivePowerW}W, " +
+                               $"Import: {energyData.TotalPowerImportKwh}kWh, " +
+                               $"Export: {energyData.TotalPowerExportKwh}kWh, " +
+                               $"Cumulative Self Consumed: {energyData.SelfConsumedSolarKwh}kWh, " +
+                               $"Incremental Self Consumed: {incrementalSelfConsumedSolar}kWh");
 
         using var scope = _serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         dbContext.EnergyData.Add(energyData);
         await dbContext.SaveChangesAsync();
+    }
+
+    private async Task<EnergyData> GetPreviousReadingAsync()
+    {
+        using var scope = _serviceProvider.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        return await dbContext.EnergyData.OrderByDescending(e => e.Timestamp).FirstOrDefaultAsync();
     }
 
     private async Task<double> GetPreviousTotalExportAsync()

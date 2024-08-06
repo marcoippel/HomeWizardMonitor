@@ -4,61 +4,147 @@
     ViewData["Title"] = "Home";
 }
 
-<h1>HomeWizard P1 Energiemonitor</h1>
+<div class="container">
+    <h1>HomeWizard P1 Energiemonitor</h1>
 
-<div id="latestData">
-    <h2>Laatste meting</h2>
-    <p>Laden...</p>
+    <div class="date-picker-container">
+        <label for="startDate">Van:</label>
+        <input type="datetime-local" id="startDate" name="startDate">
+        <label for="endDate">Tot:</label>
+        <input type="datetime-local" id="endDate" name="endDate">
+        <button onclick="updateData()">Update</button>
+    </div>
+
+    <div class="data-container">
+        <div id="periodTotals" class="data-box">
+            <h2>Totalen voor geselecteerde periode</h2>
+            <p>Selecteer een periode en klik op Update</p>
+        </div>
+
+        <div id="latestData" class="data-box">
+            <h2>Laatste meting</h2>
+            <p>Laden...</p>
+        </div>
+    </div>
+
+    <div class="chart-container">
+        <canvas id="powerChart"></canvas>
+    </div>
 </div>
-
-<div id="chart"></div>
-
-<div id="selfConsumedSolarChart"></div>
 
 @section Scripts {
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment-timezone/0.5.33/moment-timezone-with-data.min.js"></script>
     <script>
         let powerChart;
-        let solarChart;
 
-        function updateLatestData() {
-            fetch('/api/energydata/latest')
+        function setDefaultDates() {
+            const now = moment().tz("Europe/Amsterdam");
+            const startOfDay = now.clone().startOf('day');
+            const endOfDay = now.clone().endOf('day');
+
+            document.getElementById('startDate').value = formatDateTime(startOfDay);
+            document.getElementById('endDate').value = formatDateTime(endOfDay);
+        }
+
+        function formatDateTime(momentDate) {
+            return momentDate.format('YYYY-MM-DDTHH:mm');
+        }
+
+        function updateData() {
+            const startDate = moment.tz(document.getElementById('startDate').value, "Europe/Amsterdam").toISOString();
+            const endDate = moment.tz(document.getElementById('endDate').value, "Europe/Amsterdam").toISOString();
+            updatePeriodTotals(startDate, endDate);
+            updateLatestData(startDate, endDate);
+            updateCharts(startDate, endDate);
+        }
+
+        function updatePeriodTotals(startDate, endDate) {
+            fetch(`/api/energydata/period-totals?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`)
+                .then(response => response.json())
+                .then(data => {
+                    const periodTotalsDiv = document.getElementById('periodTotals');
+                    if (periodTotalsDiv) {
+                        periodTotalsDiv.innerHTML = `
+                                    <h2>Totalen voor geselecteerde periode</h2>
+                                    <p>Periode: ${moment(data.startDate).tz("Europe/Amsterdam").format('DD-MM-YYYY HH:mm')} - ${moment(data.endDate).tz("Europe/Amsterdam").format('DD-MM-YYYY HH:mm')}</p>
+                                    <p>Totaal geïmporteerd: ${data.totalImported.toFixed(2)} kWh</p>
+                                    <p>Totaal geëxporteerd: ${data.totalExported.toFixed(2)} kWh</p>
+                                    <p>Zelf verbruikte zonne-energie (periode): ${data.periodSelfConsumed.toFixed(2)} kWh</p>
+                                    <p>Zelf verbruikte zonne-energie (totaal): ${data.allTimeSelfConsumed.toFixed(2)} kWh</p>
+                                `;
+                    } else {
+                        console.error("Element with id 'periodTotals' not found");
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching period totals:', error);
+                    const periodTotalsDiv = document.getElementById('periodTotals');
+                    if (periodTotalsDiv) {
+                        periodTotalsDiv.innerHTML = '<p>Er is een fout opgetreden bij het ophalen van de totalen voor de geselecteerde periode.</p>';
+                    }
+                });
+        }
+
+        function updateLatestData(startDate, endDate) {
+            fetch(`/api/energydata/latest?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`)
                 .then(response => response.json())
                 .then(data => {
                     const latestDataDiv = document.getElementById('latestData');
-                    latestDataDiv.innerHTML = `
-                                <h2>Laatste meting</h2>
-                                <p>Tijdstip: ${new Date(data.timestamp).toLocaleString()}</p>
-                                <p>Huidig verbruik: ${data.activePowerW.toFixed(2)} W</p>
-                                <p>Totaal geïmporteerd: ${data.totalPowerImportKwh.toFixed(2)} kWh</p>
-                                <p>Totaal geëxporteerd: ${data.totalPowerExportKwh.toFixed(2)} kWh</p>
-                                <p>Zelf verbruikte zonne-energie: ${data.selfConsumedSolarKwh.toFixed(2)} kWh</p>
-                            `;
+                    if (latestDataDiv) {
+                        latestDataDiv.innerHTML = `
+                                    <h2>Laatste meting</h2>
+                                    <p>Tijdstip: ${moment(data.timestamp).tz("Europe/Amsterdam").format('DD-MM-YYYY HH:mm:ss')}</p>
+                                    <p>Huidig verbruik: ${data.activePowerW.toFixed(2)} W</p>
+                                    <p>Totaal geïmporteerd: ${data.totalPowerImportKwh.toFixed(2)} kWh</p>
+                                    <p>Totaal geëxporteerd: ${data.totalPowerExportKwh.toFixed(2)} kWh</p>
+                                `;
+                    } else {
+                        console.error("Element with id 'latestData' not found");
+                    }
                 })
-                .catch(error => console.error('Error fetching latest data:', error));
+                .catch(error => {
+                    console.error('Error fetching latest data:', error);
+                    const latestDataDiv = document.getElementById('latestData');
+                    if (latestDataDiv) {
+                        latestDataDiv.innerHTML = '<p>Er is een fout opgetreden bij het ophalen van de laatste meting.</p>';
+                    }
+                });
         }
 
-        function updateCharts() {
-            fetch('/api/energydata/lasthour')
+        function updateCharts(startDate, endDate) {
+            fetch(`/api/energydata/range?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`)
                 .then(response => response.json())
                 .then(data => {
-                    const labels = data.map(d => new Date(d.timestamp).toLocaleTimeString());
-                    const powerValues = data.map(d => d.activePowerW);
-                    const solarValues = data.map(d => d.selfConsumedSolarKwh);
+                    if (data && data.length > 0) {
+                        const labels = data.map(d => moment(d.timestamp).tz("Europe/Amsterdam").format('DD-MM HH:mm'));
+                        const powerValues = data.map(d => d.activePowerW);
 
-                    updatePowerChart(labels, powerValues);
-                    updateSolarChart(labels, solarValues);
+                        updatePowerChart(labels, powerValues);
+                    } else {
+                        console.log("No data available for the selected range");
+                        // Optionally, clear the charts or show a message
+                    }
                 })
-                .catch(error => console.error('Error fetching chart data:', error));
+                .catch(error => {
+                    console.error('Error fetching chart data:', error);
+                    // Optionally, show an error message in the chart areas
+                });
         }
 
         function updatePowerChart(labels, values) {
+            const ctx = document.getElementById('powerChart');
+            if (!ctx) {
+                console.error("Canvas element for power chart not found");
+                return;
+            }
+
             if (powerChart) {
                 powerChart.data.labels = labels;
                 powerChart.data.datasets[0].data = values;
                 powerChart.update();
             } else {
-                const ctx = document.getElementById('chart').getContext('2d');
                 powerChart = new Chart(ctx, {
                     type: 'line',
                     data: {
@@ -72,6 +158,7 @@
                     },
                     options: {
                         responsive: true,
+                        maintainAspectRatio: false,
                         scales: {
                             y: {
                                 beginAtZero: true
@@ -82,44 +169,10 @@
             }
         }
 
-        function updateSolarChart(labels, values) {
-            if (solarChart) {
-                solarChart.data.labels = labels;
-                solarChart.data.datasets[0].data = values;
-                solarChart.update();
-            } else {
-                const ctx = document.getElementById('selfConsumedSolarChart').getContext('2d');
-                solarChart = new Chart(ctx, {
-                    type: 'line',
-                    data: {
-                        labels: labels,
-                        datasets: [{
-                            label: 'Zelf verbruikte zonne-energie (kWh)',
-                            data: values,
-                            borderColor: 'rgb(255, 159, 64)',
-                            tension: 0.1
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        scales: {
-                            y: {
-                                beginAtZero: true
-                            }
-                        }
-                    }
-                });
-            }
-        }
-
-        // Update data every 10 seconds
-        setInterval(() => {
-            updateLatestData();
-            updateCharts();
-        }, 10000);
-
-        // Initial update
-        updateLatestData();
-        updateCharts();
+        // Initialize everything when the DOM is fully loaded
+        document.addEventListener('DOMContentLoaded', function () {
+            setDefaultDates();
+            updateData();
+        });
     </script>
 }
